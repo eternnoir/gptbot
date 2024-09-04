@@ -4,6 +4,8 @@ from typing import List
 from openai.types import beta
 from aiogram import types
 
+import tools
+
 from .client import client, get_thread, get_assistant
 from .logger import create_logger
 from .translate import _t
@@ -72,6 +74,24 @@ async def process_message(thread: beta.Thread, assistant: beta.Assistant, messag
     elif run.status in ["failed", "cancelled", "expired"]:
       logger.info("process_message:failed")
       break
+    elif run.status == "requires_action":
+      logger.info("process_message:requires_action")
+      tool_calls = run.required_action.submit_tool_outputs.tool_calls
+      logger.info(f"process_message:tool_calls:{tool_calls}")
+      tool_outputs = await tools.handle_tool_calls(tool_calls)
+      if tool_outputs:
+        try:
+          run = await client.beta.threads.runs.submit_tool_outputs_and_poll(
+            thread_id=thread.id,
+            run_id=run.id,
+            tool_outputs=tool_outputs
+          )
+          logger.info(f"process_message:submitted_tool_outputs:{run.id}")
+        except Exception as e:
+          logger.error(f"process_message:submit_tool_outputs:{e}")
+      else:
+        logger.info("process_message:no_tool_outputs")
+
     else:
       await ChatActions.send_typing(message)
       await asyncio.sleep(config.RUN_STATUS_POLL_INTERVAL)
